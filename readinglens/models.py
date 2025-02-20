@@ -7,6 +7,7 @@ from torchrec import EmbeddingBagCollection, EmbeddingBagConfig
 from torchrec.models.dlrm import DLRM
 from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 from transformers import AutoModel, AutoTokenizer
+from tqdm import tqdm
 
 
 class TextEncoder(nn.Module):
@@ -141,9 +142,13 @@ def train_model(model, train_loader, num_epochs=50, learning_rate=0.001):
     model = model.to(device)
 
     model.train()
-    for epoch in range(num_epochs):
+
+    epoch_pbar = tqdm(range(num_epochs), desc="Training")
+    for epoch in epoch_pbar:
         total_loss = 0
-        for texts, ratings in train_loader:
+        # Create batch progress bar
+        batch_pbar = tqdm(train_loader, leave=False, desc=f"Epoch {epoch+1}")
+        for texts, ratings in batch_pbar:
             optimizer.zero_grad()
 
             # Create sparse features in the correct format
@@ -160,8 +165,12 @@ def train_model(model, train_loader, num_epochs=50, learning_rate=0.001):
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
+            current_loss = total_loss / (batch_pbar.n + 1)  # Average loss so far
+            batch_pbar.set_postfix({"loss": f"{current_loss:.4f}"})
 
-        # Print progress every 10 epochs
-        if (epoch + 1) % 10 == 0:
-            avg_loss = total_loss / len(train_loader)
-            print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {avg_loss:.4f}")
+        # Update epoch progress bar with average loss
+        avg_loss = total_loss / len(train_loader)
+        epoch_pbar.set_postfix({"avg_loss": f"{avg_loss:.4f}"})
+
+        # Close batch progress bar
+        batch_pbar.close()
