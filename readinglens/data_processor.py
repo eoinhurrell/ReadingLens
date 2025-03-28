@@ -182,6 +182,18 @@ class MarkdownProcessor:
 
         return encoded_batch
 
+    def get_highlight_count(self, article: Dict) -> int:
+        """
+        Count the number of highlights in an article
+
+        Args:
+            article: Dictionary containing parsed article data
+
+        Returns:
+            Number of highlights
+        """
+        return len(article["highlights"])
+
     def process_and_save(
         self, input_dir: str, output_dir: str, train_ratio: float = 0.8, seed: int = 42
     ):
@@ -213,6 +225,34 @@ class MarkdownProcessor:
             except Exception as e:
                 print(f"Error processing {file_path}: {e}")
 
+        # Calculate highlight statistics
+        highlight_counts = [self.get_highlight_count(article) for article in article_data]
+
+        # Calculate statistics
+        mean_count = sum(highlight_counts) / len(highlight_counts) if highlight_counts else 0.0
+        std_count = (
+            (sum((c - mean_count) ** 2 for c in highlight_counts) / len(highlight_counts)) ** 0.5
+            if highlight_counts and len(highlight_counts) > 1
+            else 1.0  # Default to 1.0 to avoid division by zero
+        )
+
+        # Add stats to metadata
+        highlight_stats = {
+            "mean_count": mean_count,
+            "std_count": std_count,
+            "min_count": min(highlight_counts) if highlight_counts else 0,
+            "max_count": max(highlight_counts) if highlight_counts else 0,
+            "median_count": sorted(highlight_counts)[len(highlight_counts) // 2]
+            if highlight_counts
+            else 0,
+        }
+
+        # Save highlight statistics
+        with open(os.path.join(output_dir, "highlight_stats.json"), "w", encoding="utf-8") as f:
+            json.dump(highlight_stats, f, indent=2)
+
+        print(f"Highlight statistics: mean={mean_count:.2f}, std={std_count:.2f}")
+
         # Create examples
         examples = self.create_training_examples(article_data)
         print(f"Created {len(examples)} examples")
@@ -231,28 +271,11 @@ class MarkdownProcessor:
 
         # Preprocess and save train set
         train_data = self.preprocess_for_bert(train_examples)
-        # Use pickle protocol to ensure proper serialization of dictionary with tensors
-        torch.save(
-            {
-                "input_ids": train_data["input_ids"],
-                "attention_mask": train_data["attention_mask"],
-                "labels": train_data["labels"],
-            },
-            os.path.join(output_dir, "train_data.pt"),
-            pickle_protocol=4,
-        )
+        torch.save(train_data, os.path.join(output_dir, "train_data.pt"))
 
         # Preprocess and save validation set
         val_data = self.preprocess_for_bert(val_examples)
-        torch.save(
-            {
-                "input_ids": val_data["input_ids"],
-                "attention_mask": val_data["attention_mask"],
-                "labels": val_data["labels"],
-            },
-            os.path.join(output_dir, "val_data.pt"),
-            pickle_protocol=4,
-        )
+        torch.save(val_data, os.path.join(output_dir, "val_data.pt"))
 
         # Save examples for reference
         with open(os.path.join(output_dir, "train_examples.json"), "w", encoding="utf-8") as f:
@@ -271,7 +294,10 @@ def main():
     parser.add_argument("--input_dir", required=True, help="Directory containing markdown files")
     parser.add_argument("--output_dir", required=True, help="Directory to save processed data")
     parser.add_argument(
-        "--train_ratio", type=float, default=0.8, help="Ratio of data for training vs validation"
+        "--train_ratio",
+        type=float,
+        default=0.8,
+        help="Ratio of data for training vs validation",
     )
     parser.add_argument(
         "--tokenizer", default="bert-base-uncased", help="Huggingface tokenizer to use"
